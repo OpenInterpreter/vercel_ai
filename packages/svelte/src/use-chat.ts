@@ -34,8 +34,6 @@ export type UseChatOptions = SharedUseChatOptions & {
 };
 
 export type UseChatHelpers = {
-  /** Current messages in the chat */
-  messages: Readable<Message[]>;
   /** The error object of the API request */
   error: Readable<undefined | Error>;
   /**
@@ -69,6 +67,7 @@ export type UseChatHelpers = {
     messages: Message[] | ((messages: Message[]) => Message[]),
   ) => void;
 
+  messages: Writable<Message[]>;
   /** The current value of the input */
   input: Writable<string>;
   /** Form submission handler to automatically reset input and append a user message  */
@@ -575,7 +574,6 @@ export function useChat({
   };
 
   return {
-    messages,
     error,
     append,
     reload,
