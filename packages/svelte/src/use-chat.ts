@@ -34,6 +34,8 @@ export type UseChatOptions = SharedUseChatOptions & {
 };
 
 export type UseChatHelpers = {
+  /** Current messages in the chat */
+  messages: Readable<Message[]>;
   /** The error object of the API request */
   error: Readable<undefined | Error>;
   /**
@@ -67,7 +69,6 @@ export type UseChatHelpers = {
     messages: Message[] | ((messages: Message[]) => Message[]),
   ) => void;
 
-  messages: Writable<Message[]>;
   /** The current value of the input */
   input: Writable<string>;
   /** Form submission handler to automatically reset input and append a user message  */
@@ -267,47 +268,32 @@ export function useChat({
   const chatId = id || `chat-${uniqueId++}`;
 
   const key = `${api}|${chatId}`;
-
-  let messages: Writable<Message[]>;
-  let mutate: (data: Message[]) => Promise<Message[] | undefined>;
-  let isSWRLoading: Readable<boolean>;
-
-  // Abort controller to cancel the current API call.
-  let abortController: AbortController | null = null;
-
-  if (messageStore) {
-    // Use the provided messageStore
-    messages = messageStore;
-    mutate = (data: Message[]) => {
-      messages.set(data);
-      return Promise.resolve(data);
-    };
-    isSWRLoading = writable(false);
-  } else {
-    // Use the default SWR-based store
-    const {
-      data,
-      mutate: originalMutate,
-      isLoading,
-    } = useSWR<Message[]>(key, {
-      fetcher: () => store[key] || initialMessages,
-      fallbackData: initialMessages,
-    });
-
-    // Force the `data` to be `initialMessages` if it's `undefined`.
-    data.set(initialMessages);
-
-    messages = data as Writable<Message[]>;
-    mutate = (data: Message[]) => {
-      store[key] = data;
-      return originalMutate(data);
-    };
-    isSWRLoading = isLoading;
-  }
+  const {
+    data,
+    mutate: originalMutate,
+    isLoading: isSWRLoading,
+  } = useSWR<Message[]>(key, {
+    fetcher: () => store[key] || initialMessages,
+    fallbackData: initialMessages,
+  });
 
   const streamData = writable<JSONValue[] | undefined>(undefined);
 
   const loading = writable<boolean>(false);
+
+  // Force the `data` to be `initialMessages` if it's `undefined`.
+  data.set(initialMessages);
+
+  const mutate = (data: Message[]) => {
+    store[key] = data;
+    return originalMutate(data);
+  };
+
+  // Because of the `fallbackData` option, the `data` will never be `undefined`.
+  messageStore = data as Writable<Message[]>;
+
+  // Abort controller to cancel the current API call.
+  let abortController: AbortController | null = null;
 
   const extraMetadata = {
     credentials,
@@ -320,7 +306,7 @@ export function useChat({
   // Actual mutation hook to send messages to the API endpoint and update the
   // chat state.
   async function triggerRequest(chatRequest: ChatRequest) {
-    const messagesSnapshot = get(messages);
+    const messagesSnapshot = get(messageStore);
     const messageCount = messagesSnapshot.length;
 
     try {
@@ -339,7 +325,7 @@ export function useChat({
             },
             get(streamData),
             extraMetadata,
-            get(messages),
+            get(messageStore),
             abortController,
             generateId,
             streamProtocol,
@@ -355,7 +341,7 @@ export function useChat({
         updateChatRequest: chatRequestParam => {
           chatRequest = chatRequestParam;
         },
-        getCurrentMessages: () => get(messages),
+        getCurrentMessages: () => get(messageStore),
       });
 
       abortController = null;
@@ -376,7 +362,7 @@ export function useChat({
     }
 
     // auto-submit when all tool calls in the last assistant message have results:
-    const newMessagesSnapshot = get(messages);
+    const newMessagesSnapshot = get(messageStore);
     const lastMessage = newMessagesSnapshot[newMessagesSnapshot.length - 1];
 
     if (
@@ -418,7 +404,7 @@ export function useChat({
     };
 
     const chatRequest: ChatRequest = {
-      messages: get(messages).concat(message as Message),
+      messages: get(messageStore).concat(message as Message),
       options: requestOptions,
       headers: requestOptions.headers,
       body: requestOptions.body,
@@ -441,7 +427,7 @@ export function useChat({
     headers,
     body,
   }: ChatRequestOptions = {}) => {
-    const messagesSnapshot = get(messages);
+    const messagesSnapshot = get(messageStore);
     if (messagesSnapshot.length === 0) return null;
 
     const requestOptions = {
@@ -489,7 +475,7 @@ export function useChat({
     messagesArg: Message[] | ((messages: Message[]) => Message[]),
   ) => {
     if (typeof messagesArg === 'function') {
-      messagesArg = messagesArg(get(messages));
+      messagesArg = messagesArg(get(messageStore));
     }
 
     mutate(messagesArg);
@@ -514,8 +500,8 @@ export function useChat({
     const chatRequest: ChatRequest = {
       messages:
         !inputValue && options.allowEmptySubmit
-          ? get(messages)
-          : get(messages).concat({
+          ? get(messageStore)
+          : get(messageStore).concat({
               id: generateId(),
               content: inputValue,
               role: 'user',
@@ -546,7 +532,7 @@ export function useChat({
     toolCallId: string;
     result: any;
   }) => {
-    const messagesSnapshot = get(messages) ?? [];
+    const messagesSnapshot = get(messageStore) ?? [];
     const updatedMessages = messagesSnapshot.map((message, index, arr) =>
       // update the tool calls in the last assistant message:
       index === arr.length - 1 &&
@@ -563,7 +549,7 @@ export function useChat({
         : message,
     );
 
-    messages.set(updatedMessages);
+    messageStore.set(updatedMessages);
 
     // auto-submit when all tool calls in the last assistant message have results:
     const lastMessage = updatedMessages[updatedMessages.length - 1];
