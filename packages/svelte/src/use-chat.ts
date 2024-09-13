@@ -236,6 +236,7 @@ export function useChat({
   sendExtraMessageFields,
   experimental_onFunctionCall,
   experimental_onToolCall,
+  messageStore,
   streamMode,
   streamProtocol,
   onResponse,
@@ -267,32 +268,47 @@ export function useChat({
   const chatId = id || `chat-${uniqueId++}`;
 
   const key = `${api}|${chatId}`;
-  const {
-    data,
-    mutate: originalMutate,
-    isLoading: isSWRLoading,
-  } = useSWR<Message[]>(key, {
-    fetcher: () => store[key] || initialMessages,
-    fallbackData: initialMessages,
-  });
+
+  let messages: Writable<Message[]>;
+  let mutate: (data: Message[]) => Promise<Message[] | undefined>;
+  let isSWRLoading: Readable<boolean>;
+
+  // Abort controller to cancel the current API call.
+  let abortController: AbortController | null = null;
+
+  if (messageStore) {
+    // Use the provided messageStore
+    messages = messageStore;
+    mutate = (data: Message[]) => {
+      messages.set(data);
+      return Promise.resolve(data);
+    };
+    isSWRLoading = writable(false);
+  } else {
+    // Use the default SWR-based store
+    const {
+      data,
+      mutate: originalMutate,
+      isLoading,
+    } = useSWR<Message[]>(key, {
+      fetcher: () => store[key] || initialMessages,
+      fallbackData: initialMessages,
+    });
+
+    // Force the `data` to be `initialMessages` if it's `undefined`.
+    data.set(initialMessages);
+
+    messages = data as Writable<Message[]>;
+    mutate = (data: Message[]) => {
+      store[key] = data;
+      return originalMutate(data);
+    };
+    isSWRLoading = isLoading;
+  }
 
   const streamData = writable<JSONValue[] | undefined>(undefined);
 
   const loading = writable<boolean>(false);
-
-  // Force the `data` to be `initialMessages` if it's `undefined`.
-  data.set(initialMessages);
-
-  const mutate = (data: Message[]) => {
-    store[key] = data;
-    return originalMutate(data);
-  };
-
-  // Because of the `fallbackData` option, the `data` will never be `undefined`.
-  const messages = data as Writable<Message[]>;
-
-  // Abort controller to cancel the current API call.
-  let abortController: AbortController | null = null;
 
   const extraMetadata = {
     credentials,
