@@ -31,6 +31,8 @@ export type UseChatOptions = SharedUseChatOptions & {
   By default, it's set to 0, which will disable the feature.
   */
   maxToolRoundtrips?: number;
+
+  messageStore?: Readable<Message[]>;
 };
 
 export type UseChatHelpers = {
@@ -306,7 +308,7 @@ export function useChat({
   // Actual mutation hook to send messages to the API endpoint and update the
   // chat state.
   async function triggerRequest(chatRequest: ChatRequest) {
-    const messagesSnapshot = get(messageStore);
+    const messagesSnapshot: Message[] = get(messageStore);
     const messageCount = messagesSnapshot.length;
 
     try {
@@ -362,7 +364,7 @@ export function useChat({
     }
 
     // auto-submit when all tool calls in the last assistant message have results:
-    const newMessagesSnapshot = get(messageStore);
+    const newMessagesSnapshot: Message[] = get(messageStore);
     const lastMessage = newMessagesSnapshot[newMessagesSnapshot.length - 1];
 
     if (
@@ -403,8 +405,9 @@ export function useChat({
       body: body ?? options?.body,
     };
 
+    const currentMessages: Message[] = get(messageStore);
     const chatRequest: ChatRequest = {
-      messages: get(messageStore).concat(message as Message),
+      messages: currentMessages.concat(message as Message),
       options: requestOptions,
       headers: requestOptions.headers,
       body: requestOptions.body,
@@ -427,7 +430,7 @@ export function useChat({
     headers,
     body,
   }: ChatRequestOptions = {}) => {
-    const messagesSnapshot = get(messageStore);
+    const messagesSnapshot: Message[] = get(messageStore);
     if (messagesSnapshot.length === 0) return null;
 
     const requestOptions = {
@@ -497,11 +500,12 @@ export function useChat({
       body: options.body ?? options.options?.body,
     };
 
+    const currentMessages: Message[] = get(messageStore);
     const chatRequest: ChatRequest = {
       messages:
         !inputValue && options.allowEmptySubmit
-          ? get(messageStore)
-          : get(messageStore).concat({
+          ? currentMessages
+          : currentMessages.concat({
               id: generateId(),
               content: inputValue,
               role: 'user',
@@ -532,7 +536,7 @@ export function useChat({
     toolCallId: string;
     result: any;
   }) => {
-    const messagesSnapshot = get(messageStore) ?? [];
+    const messagesSnapshot: Message[] = get(messageStore) ?? [];
     const updatedMessages = messagesSnapshot.map((message, index, arr) =>
       // update the tool calls in the last assistant message:
       index === arr.length - 1 &&
@@ -560,6 +564,7 @@ export function useChat({
   };
 
   return {
+    messages: messageStore,
     error,
     append,
     reload,
